@@ -156,8 +156,8 @@ def fetch_url(url):
             data = response.read()
             text = data.decode("utf-8")
             return json.loads(text)
-    except Exception as error:
-        print(f"  [Error fetching data: {error}]")
+    except Exception:
+        # Silently return None — the calling function handles missing data
         return None
 
 
@@ -168,8 +168,6 @@ def fetch_url(url):
 
 def search_wikipedia(query):
     """Search Wikipedia for background knowledge on a topic."""
-    print("  Searching Wikipedia...")
-
     encoded_query = urllib.parse.quote(query)
     search_url = (
         f"https://en.wikipedia.org/w/api.php"
@@ -203,14 +201,11 @@ def search_wikipedia(query):
                 "source": "Wikipedia",
             })
 
-    print(f"  Found {len(results)} Wikipedia article(s).")
     return results
 
 
 def search_duckduckgo(query):
     """Search DuckDuckGo for web results and instant answers."""
-    print("  Searching DuckDuckGo...")
-
     encoded_query = urllib.parse.quote(query)
     url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_html=1"
 
@@ -237,14 +232,11 @@ def search_duckduckgo(query):
                 "source": "DuckDuckGo",
             })
 
-    print(f"  Found {len(results)} DuckDuckGo result(s).")
     return results
 
 
 def search_reddit(query):
     """Search Reddit for community discussions on a topic."""
-    print("  Searching Reddit...")
-
     encoded_query = urllib.parse.quote(query)
     url = (
         f"https://www.reddit.com/search.json"
@@ -260,8 +252,7 @@ def search_reddit(query):
         )
         with urllib.request.urlopen(request, timeout=10) as response:
             data = json.loads(response.read().decode("utf-8"))
-    except Exception as error:
-        print(f"  [Reddit unavailable: {error}]")
+    except Exception:
         return []
 
     results = []
@@ -288,7 +279,6 @@ def search_reddit(query):
             "source": "Reddit",
         })
 
-    print(f"  Found {len(results)} Reddit post(s).")
     return results
 
 
@@ -297,10 +287,7 @@ def search_news(query):
     api_key = os.environ.get("NEWSAPI_KEY", "")
 
     if not api_key:
-        print("  Skipping NewsAPI (no API key set).")
         return []
-
-    print("  Searching NewsAPI...")
 
     encoded_query = urllib.parse.quote(query)
     url = (
@@ -333,7 +320,6 @@ def search_news(query):
             "source": "NewsAPI",
         })
 
-    print(f"  Found {len(results)} news article(s).")
     return results
 
 
@@ -597,15 +583,17 @@ def research_round(question, memory):
     print(f"\n  Category: {category}")
 
     # --- Phase 1: Generate smart search terms ---
-    print(f"\n  Generating search terms...")
+    print(f"  Generating search terms...", end=" ", flush=True)
     search_terms = generate_search_terms(question)
+    print(f"done ({len(search_terms)} terms)")
 
     # --- Phase 2: Search with each term and combine results ---
     all_results = []
-    for term in search_terms:
-        print(f"\n  Searching for: '{term}'")
+    for i, term in enumerate(search_terms, start=1):
+        print(f"  [{i}/{len(search_terms)}] Searching: '{term}'...", end=" ", flush=True)
         results = gather_results(term)
         all_results.extend(results)
+        print(f"{len(results)} found")
 
     # --- CONCEPT: Deduplication ---
     # When searching multiple terms, we might get the same result twice.
