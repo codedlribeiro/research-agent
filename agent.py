@@ -451,20 +451,32 @@ Always structure your response with these sections:
 5. SUGGESTED FOLLOW-UPS — 2-3 follow-up questions the user could ask next
 
 Keep your response concise and focused on business value.
-If the results are limited or not very relevant, say so honestly
-and suggest better search terms the user could try.
+
+IMPORTANT: If the search results are empty, limited, or not relevant,
+use your own knowledge to answer the question as best you can.
+Clearly note which information comes from search results vs your
+own knowledge. Still provide all 5 sections above.
 
 If previous research context is provided, reference it and build on it
 rather than repeating the same information."""
 
-    user_prompt = f"""Research Question: {question}
+    if results_text:
+        user_prompt = f"""Research Question: {question}
 Category: {category}
 {memory_context}
 
-Here are the NEW research results I gathered:
+Here are the research results I gathered from multiple sources:
 {results_text}
 
 Please analyze these results and provide your structured analysis."""
+    else:
+        user_prompt = f"""Research Question: {question}
+Category: {category}
+{memory_context}
+
+My search sources returned no results for this query.
+Please use your own knowledge to answer this research question
+as thoroughly as you can. Provide your structured analysis."""
 
     try:
         client = anthropic.Anthropic()
@@ -611,14 +623,12 @@ def research_round(question, memory):
     display_results(all_results, category)
 
     # --- Phase 4: AI Analysis with memory ---
-    analysis = None
-    if all_results:
-        analysis = analyze_with_ai(question, all_results, category, memory)
-        if analysis:
-            display_analysis(analysis)
-    else:
-        print("\n  No results found. Try rephrasing your question,")
-        print("  or use broader/simpler terms.")
+    # Even if no search results were found, we still ask the AI
+    # to answer from its own knowledge. This way the agent is
+    # always useful, even when APIs return nothing.
+    analysis = analyze_with_ai(question, all_results, category, memory)
+    if analysis:
+        display_analysis(analysis)
 
     # --- Phase 5: Store in memory ---
     memory.add_round(question, category, all_results, analysis)
