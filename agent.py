@@ -1,12 +1,14 @@
-# Research Agent - Step 2: Functions
-# ====================================
-# Functions let you group code into reusable blocks.
-# Think of them as "recipes" — you define them once, then call them anytime.
+# Research Agent - Step 3: Working with APIs
+# =============================================
+# APIs (Application Programming Interfaces) let your code talk to
+# services on the internet. You send a request, and get data back.
 
-# --- CONCEPT: Functions ---
-# 'def' defines a function. The name describes what it does.
-# Parameters (in parentheses) are inputs the function accepts.
-# 'return' sends a result back to whoever called the function.
+# --- CONCEPT: Imports ---
+# 'import' brings in code that others have written so you can use it.
+# These are part of Python's "standard library" — they come pre-installed.
+import json  # For working with JSON data (the format APIs use)
+import urllib.request  # For making web requests
+import urllib.parse  # For formatting URLs safely
 
 
 def greet_user():
@@ -21,14 +23,8 @@ def greet_user():
 
 
 def get_question():
-    """Ask the user for a research question and return it.
-
-    Returns:
-        str: The user's question, or None if they didn't type anything.
-    """
+    """Ask the user for a research question and return it."""
     question = input("What would you like to research? ")
-
-    # .strip() removes extra spaces from the start and end
     question = question.strip()
 
     if question == "":
@@ -37,22 +33,9 @@ def get_question():
 
 
 def categorize_question(question):
-    """Figure out what type of research the user wants.
-
-    This is a simple version — later we'll use AI to do this.
-
-    Parameters:
-        question (str): The user's research question.
-
-    Returns:
-        str: The category of research.
-    """
-    # .lower() converts text to lowercase so we can match more easily
+    """Figure out what type of research the user wants."""
     question_lower = question.lower()
 
-    # --- CONCEPT: Dictionaries ---
-    # A dictionary maps "keys" to "values", like a real dictionary
-    # maps words to definitions. Here we map keywords to categories.
     categories = {
         "competitor": "Competitor Analysis",
         "market": "Market Research",
@@ -64,81 +47,153 @@ def categorize_question(question):
         "fund": "Funding Research",
     }
 
-    # Check if any keyword appears in the question
     for keyword, category in categories.items():
         if keyword in question_lower:
             return category
 
-    # Default if no keywords match
     return "General Business Research"
 
 
-def plan_research(question, category):
-    """Create a research plan based on the question and category.
+# --- CONCEPT: Making API Calls ---
+# An API call is like visiting a website, but instead of getting a
+# webpage, you get structured data (usually in JSON format).
+# JSON looks like Python dictionaries — {"key": "value"}
+
+
+def fetch_url(url):
+    """Fetch data from a URL and return it as a Python dictionary.
+
+    This is a helper function — it handles the repetitive work of
+    making web requests so other functions don't have to.
 
     Parameters:
-        question (str): The user's research question.
-        category (str): The type of research identified.
+        url (str): The URL to fetch data from.
 
     Returns:
-        dict: A research plan with sources and steps.
+        dict: The JSON response parsed into a Python dictionary,
+              or None if the request failed.
     """
-    # --- CONCEPT: Dictionaries (deeper) ---
-    # Dictionaries can hold any type of value, including lists and other dicts.
-    plan = {
-        "question": question,
-        "category": category,
-        "sources": ["Web Search", "News APIs", "Academic Papers"],
-        "output_types": [
-            "Summary",
-            "Sources & Links",
-            "Viewpoint Comparison",
-            "Action Plan",
-        ],
-        "steps": [
-            f"Search the web for: {question}",
-            "Gather articles from news sources",
-            "Look for relevant academic research",
-            "Summarize key findings",
-            "Compare different viewpoints",
-            "Create an action plan",
-        ],
-    }
-    return plan
+    # --- CONCEPT: Try/Except (Error Handling) ---
+    # Sometimes things go wrong (no internet, bad URL, etc.).
+    # try/except lets your program handle errors gracefully
+    # instead of crashing.
+    try:
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "ResearchAgent/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            data = response.read()
+            # .decode() converts raw bytes into a string
+            text = data.decode("utf-8")
+            # json.loads() converts a JSON string into a Python dictionary
+            return json.loads(text)
+    except Exception as error:
+        print(f"  [Error fetching data: {error}]")
+        return None
 
 
-def display_plan(plan):
-    """Show the research plan to the user.
+def search_wikipedia(query):
+    """Search Wikipedia for articles related to the query.
+
+    Wikipedia has a free API — no account or key needed!
+    We use two endpoints:
+      1. Search — find relevant article titles
+      2. Summary — get a summary of each article
 
     Parameters:
-        plan (dict): The research plan dictionary.
+        query (str): What to search for.
+
+    Returns:
+        list: A list of dictionaries, each with 'title', 'summary', and 'url'.
     """
-    print(f"\n{'─' * 50}")
-    print(f"  Research Category: {plan['category']}")
-    print(f"{'─' * 50}")
+    print("\n  Searching Wikipedia...")
 
-    print(f"\n  Question: {plan['question']}")
+    # --- CONCEPT: URL Encoding ---
+    # URLs can't have spaces or special characters.
+    # urllib.parse.quote() converts "meal kit delivery" to "meal%20kit%20delivery"
+    encoded_query = urllib.parse.quote(query)
 
-    print("\n  Sources I'll check:")
-    for source in plan["sources"]:
-        print(f"    • {source}")
+    # Step 1: Search for matching article titles
+    search_url = (
+        f"https://en.wikipedia.org/w/api.php"
+        f"?action=opensearch&search={encoded_query}&limit=3&format=json"
+    )
 
-    print("\n  Research steps:")
-    for i, step in enumerate(plan["steps"], start=1):
-        print(f"    {i}. {step}")
+    search_data = fetch_url(search_url)
+    if search_data is None or len(search_data) < 4:
+        return []
 
-    print("\n  You'll receive:")
-    for output in plan["output_types"]:
-        print(f"    ✓ {output}")
+    # Wikipedia's opensearch returns: [query, [titles], [descriptions], [urls]]
+    titles = search_data[1]
+    urls = search_data[3]
 
-    print(f"\n{'─' * 50}")
-    print("  ⚡ Search functionality coming in Step 3!")
-    print(f"{'─' * 50}")
+    # Step 2: Get a summary for each article
+    results = []
+    for title, url in zip(titles, urls):
+        encoded_title = urllib.parse.quote(title)
+        summary_url = (
+            f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded_title}"
+        )
+
+        summary_data = fetch_url(summary_url)
+        if summary_data and "extract" in summary_data:
+            summary = summary_data["extract"]
+            # Truncate long summaries to keep output readable
+            if len(summary) > 300:
+                summary = summary[:300] + "..."
+
+            results.append({
+                "title": title,
+                "summary": summary,
+                "url": url,
+                "source": "Wikipedia",
+            })
+
+    print(f"  Found {len(results)} Wikipedia article(s).")
+    return results
 
 
-# --- CONCEPT: Main Function ---
-# It's good practice to put your "starting point" in a main() function.
-# This keeps everything organized and clear.
+def display_results(results, category):
+    """Display research results to the user.
+
+    Parameters:
+        results (list): List of result dictionaries.
+        category (str): The research category.
+    """
+    if not results:
+        print("\n  No results found. Try rephrasing your question.")
+        return
+
+    print(f"\n{'═' * 50}")
+    print(f"  RESEARCH RESULTS — {category}")
+    print(f"{'═' * 50}")
+
+    for i, result in enumerate(results, start=1):
+        print(f"\n  [{i}] {result['title']}")
+        print(f"      Source: {result['source']}")
+        print(f"      {result['summary']}")
+        print(f"      Link: {result['url']}")
+
+    print(f"\n{'═' * 50}")
+    print(f"  Total: {len(results)} result(s) from {_count_sources(results)} source(s)")
+    print(f"{'═' * 50}")
+
+
+def _count_sources(results):
+    """Count the number of unique sources in the results.
+
+    The underscore prefix is a Python convention meaning
+    'this is a helper function, not meant to be called directly.'
+    """
+    # --- CONCEPT: Sets ---
+    # A set is like a list, but it only keeps unique values.
+    # Great for counting distinct items.
+    sources = set()
+    for result in results:
+        sources.add(result["source"])
+    return len(sources)
+
 
 def main():
     """Run the research agent."""
@@ -151,12 +206,21 @@ def main():
         return
 
     category = categorize_question(question)
-    plan = plan_research(question, category)
-    display_plan(plan)
+    print(f"\n  Category: {category}")
+    print(f"  Researching: {question}")
+
+    # --- Gather results from all sources ---
+    all_results = []
+
+    # Source 1: Wikipedia
+    wiki_results = search_wikipedia(question)
+    all_results.extend(wiki_results)
+
+    # (More sources coming in Step 4!)
+
+    # --- Display everything ---
+    display_results(all_results, category)
 
 
-# --- CONCEPT: Entry Point ---
-# This line means: "Only run main() if this file is executed directly."
-# It won't run if this file is imported by another file.
 if __name__ == "__main__":
     main()
