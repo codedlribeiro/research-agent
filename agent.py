@@ -1,12 +1,23 @@
-# Research Agent - Step 4: Multiple Search Sources
-# ==================================================
-# Now our agent searches across multiple sources:
-# Wikipedia, DuckDuckGo, Reddit, and NewsAPI.
+# Research Agent - Step 5: AI-Powered Reasoning
+# ================================================
+# Now our agent uses Claude to THINK about the results —
+# summarizing, comparing viewpoints, and creating action plans.
 
 import json
-import os  # For reading environment variables (like API keys)
+import os
 import urllib.request
 import urllib.parse
+
+# --- CONCEPT: Third-Party Libraries ---
+# Unlike 'json' and 'os' which come with Python, 'anthropic' is a
+# third-party library we installed with 'pip3 install anthropic'.
+# We use try/except on the import so the program doesn't crash
+# if it's not installed yet.
+try:
+    import anthropic
+    HAS_ANTHROPIC = True
+except ImportError:
+    HAS_ANTHROPIC = False
 
 
 def greet_user():
@@ -122,19 +133,10 @@ def search_wikipedia(query):
 # =============================================================
 #  SOURCE 2: DUCKDUCKGO
 # =============================================================
-# DuckDuckGo has an "Instant Answer" API — free, no key needed.
-# It returns quick facts and related topics for a search query.
 
 
 def search_duckduckgo(query):
-    """Search DuckDuckGo for web results and instant answers.
-
-    Parameters:
-        query (str): What to search for.
-
-    Returns:
-        list: A list of result dictionaries.
-    """
+    """Search DuckDuckGo for web results and instant answers."""
     print("  Searching DuckDuckGo...")
 
     encoded_query = urllib.parse.quote(query)
@@ -146,7 +148,6 @@ def search_duckduckgo(query):
 
     results = []
 
-    # DuckDuckGo returns an "Abstract" — a short summary from a source
     if data.get("Abstract"):
         results.append({
             "title": data.get("Heading", "DuckDuckGo Result"),
@@ -155,12 +156,7 @@ def search_duckduckgo(query):
             "source": "DuckDuckGo",
         })
 
-    # It also returns "RelatedTopics" — links to related subjects
-    # --- CONCEPT: Nested Data ---
-    # API responses often have data inside data (dicts inside lists inside dicts).
-    # You need to navigate through the layers to find what you want.
     for topic in data.get("RelatedTopics", [])[:3]:
-        # Some topics are grouped, some are direct — we only want direct ones
         if "Text" in topic:
             results.append({
                 "title": topic.get("Text", "")[:80],
@@ -176,26 +172,10 @@ def search_duckduckgo(query):
 # =============================================================
 #  SOURCE 3: REDDIT
 # =============================================================
-# Reddit has a public JSON API. You can get JSON from almost any
-# Reddit page by adding ".json" to the URL. No key needed!
 
 
 def search_reddit(query):
-    """Search Reddit for community discussions on a topic.
-
-    Reddit is great for real opinions, reviews, and discussions
-    that you won't find in encyclopedias or news articles.
-
-    Note: Reddit blocks many automated requests. We use a more
-    descriptive User-Agent to be polite, but if it still fails,
-    we skip gracefully.
-
-    Parameters:
-        query (str): What to search for.
-
-    Returns:
-        list: A list of result dictionaries.
-    """
+    """Search Reddit for community discussions on a topic."""
     print("  Searching Reddit...")
 
     encoded_query = urllib.parse.quote(query)
@@ -204,9 +184,6 @@ def search_reddit(query):
         f"?q={encoded_query}&sort=relevance&limit=3&t=year"
     )
 
-    # --- CONCEPT: Custom Headers ---
-    # Some APIs require specific headers to allow access.
-    # Reddit wants a descriptive User-Agent string.
     try:
         request = urllib.request.Request(
             url,
@@ -221,11 +198,6 @@ def search_reddit(query):
         return []
 
     results = []
-
-    # --- CONCEPT: Navigating Complex JSON ---
-    # Reddit's API nests data deeply:
-    #   data -> data -> children -> [each post] -> data -> title
-    # You chain dictionary lookups to dig through the layers.
     posts = data.get("data", {}).get("children", [])
 
     for post in posts:
@@ -237,10 +209,8 @@ def search_reddit(query):
         score = post_data.get("score", 0)
         num_comments = post_data.get("num_comments", 0)
 
-        # Build a useful summary from the post data
         summary = f"r/{subreddit} | {score} upvotes | {num_comments} comments"
         if selftext:
-            # Show a preview of the post text
             preview = selftext[:200] + "..." if len(selftext) > 200 else selftext
             summary += f"\n      {preview}"
 
@@ -258,36 +228,14 @@ def search_reddit(query):
 # =============================================================
 #  SOURCE 4: NEWSAPI
 # =============================================================
-# NewsAPI requires a free API key from https://newsapi.org
-# We read the key from an environment variable so it stays private.
-#
-# --- CONCEPT: Environment Variables ---
-# Environment variables are settings stored OUTSIDE your code.
-# This keeps secrets (like API keys) out of your code files,
-# so you don't accidentally share them on GitHub.
 
 
 def search_news(query):
-    """Search recent news articles using NewsAPI.
-
-    Requires a NEWSAPI_KEY environment variable to be set.
-    If not set, this source is skipped gracefully.
-
-    Parameters:
-        query (str): What to search for.
-
-    Returns:
-        list: A list of result dictionaries.
-    """
-    # --- CONCEPT: os.environ ---
-    # os.environ.get() reads an environment variable.
-    # The second argument is a default if the variable isn't set.
+    """Search recent news articles using NewsAPI."""
     api_key = os.environ.get("NEWSAPI_KEY", "")
 
     if not api_key:
         print("  Skipping NewsAPI (no API key set).")
-        print("  To enable: export NEWSAPI_KEY='your-key-here'")
-        print("  Get a free key at: https://newsapi.org")
         return []
 
     print("  Searching NewsAPI...")
@@ -310,7 +258,7 @@ def search_news(query):
         description = article.get("description", "No description available.")
         source_name = article.get("source", {}).get("name", "Unknown")
         article_url = article.get("url", "")
-        published = article.get("publishedAt", "")[:10]  # Just the date
+        published = article.get("publishedAt", "")[:10]
 
         summary = f"[{source_name}] ({published}) {description}"
         if len(summary) > 300:
@@ -328,23 +276,130 @@ def search_news(query):
 
 
 # =============================================================
+#  AI-POWERED ANALYSIS (NEW IN STEP 5!)
+# =============================================================
+# This is where the magic happens. Instead of just showing raw
+# results, we send them to Claude (an AI) to:
+#   1. Summarize the key findings
+#   2. Compare different viewpoints
+#   3. Create an action plan
+#
+# --- CONCEPT: LLM (Large Language Model) ---
+# An LLM is an AI that understands and generates text.
+# You talk to it by sending a "prompt" (your instructions)
+# and it sends back a response. It's like texting a very
+# smart assistant.
+
+
+def analyze_with_ai(question, results, category):
+    """Use Claude to analyze research results and provide insights.
+
+    This function sends all the raw results to Claude along with
+    instructions on how to analyze them. Claude returns a
+    structured analysis with summaries, viewpoints, and action plans.
+
+    Parameters:
+        question (str): The original research question.
+        results (list): All search results gathered.
+        category (str): The research category.
+
+    Returns:
+        str: Claude's analysis, or None if AI is unavailable.
+    """
+    # Check if we can use AI
+    if not HAS_ANTHROPIC:
+        print("\n  [AI analysis unavailable — run: pip3 install anthropic]")
+        return None
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        print("\n  [AI analysis unavailable — no ANTHROPIC_API_KEY set]")
+        print("  To enable: export ANTHROPIC_API_KEY='your-key-here'")
+        return None
+
+    print("\n  Analyzing results with AI...")
+
+    # --- CONCEPT: Preparing Data for the AI ---
+    # We need to convert our results into text that Claude can read.
+    # This is called "building a prompt" — the better your prompt,
+    # the better the AI's response.
+    results_text = ""
+    for i, result in enumerate(results, start=1):
+        results_text += f"\n--- Result {i} ---\n"
+        results_text += f"Title: {result['title']}\n"
+        results_text += f"Source: {result['source']}\n"
+        results_text += f"Summary: {result['summary']}\n"
+        results_text += f"URL: {result['url']}\n"
+
+    # --- CONCEPT: System Prompt vs User Prompt ---
+    # When talking to an LLM, you typically send two things:
+    #   - System prompt: Sets the AI's role and behavior
+    #   - User prompt: The actual question or task
+    system_prompt = """You are a business research analyst. Your job is to analyze
+research results and provide clear, actionable insights.
+
+Always structure your response with these sections:
+1. SUMMARY — A brief overview of what the research found (2-3 sentences)
+2. KEY FINDINGS — Bullet points of the most important facts
+3. DIFFERENT VIEWPOINTS — If the sources show different perspectives, highlight them
+4. ACTION PLAN — 3-5 concrete next steps the user could take based on the research
+
+Keep your response concise and focused on business value.
+If the results are limited or not very relevant, say so honestly
+and suggest better search terms."""
+
+    user_prompt = f"""Research Question: {question}
+Category: {category}
+
+Here are the research results I gathered from multiple sources:
+{results_text}
+
+Please analyze these results and provide your structured analysis."""
+
+    # --- CONCEPT: Making an API Call to an LLM ---
+    # We create a "client" (our connection to Claude), then send
+    # a message with our prompts. The API returns Claude's response.
+    try:
+        client = anthropic.Anthropic()  # Uses ANTHROPIC_API_KEY automatically
+
+        # --- CONCEPT: API Parameters ---
+        # model: Which AI model to use (haiku is fast and cheap)
+        # max_tokens: Maximum length of the response
+        # messages: The conversation (role + content pairs)
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": user_prompt}
+            ],
+        )
+
+        # The response contains a list of content blocks
+        # We extract the text from the first one
+        response_text = message.content[0].text
+        return response_text
+
+    except Exception as error:
+        print(f"  [AI analysis error: {error}]")
+        return None
+
+
+# =============================================================
 #  DISPLAY RESULTS
 # =============================================================
 
 
 def display_results(results, category):
-    """Display research results to the user."""
+    """Display raw research results to the user."""
     if not results:
         print("\n  No results found. Try rephrasing your question.")
         return
 
     print(f"\n{'═' * 50}")
-    print(f"  RESEARCH RESULTS — {category}")
+    print(f"  RAW RESULTS — {category}")
     print(f"{'═' * 50}")
 
-    # --- CONCEPT: Grouping Results ---
-    # We group results by source so the output is organized.
-    # This uses a pattern: loop through, check source, print headers.
     current_source = None
     result_num = 1
 
@@ -361,6 +416,20 @@ def display_results(results, category):
     print(f"\n{'═' * 50}")
     print(f"  Total: {len(results)} result(s) from {_count_sources(results)} source(s)")
     print(f"{'═' * 50}")
+
+
+def display_analysis(analysis):
+    """Display the AI's analysis to the user.
+
+    Parameters:
+        analysis (str): The AI-generated analysis text.
+    """
+    print(f"\n{'═' * 50}")
+    print(f"  AI ANALYSIS")
+    print(f"{'═' * 50}")
+    print()
+    print(analysis)
+    print(f"\n{'═' * 50}")
 
 
 def _count_sources(results):
@@ -390,23 +459,21 @@ def main():
     print(f"\n  Category: {category}")
     print(f"  Researching: {question}")
 
-    # --- Gather results from ALL sources ---
+    # --- Phase 1: Gather results from ALL sources ---
     all_results = []
-
-    # Source 1: Wikipedia (background knowledge)
     all_results.extend(search_wikipedia(question))
-
-    # Source 2: DuckDuckGo (web search)
     all_results.extend(search_duckduckgo(question))
-
-    # Source 3: Reddit (community discussions)
     all_results.extend(search_reddit(question))
-
-    # Source 4: NewsAPI (recent news — needs API key)
     all_results.extend(search_news(question))
 
-    # --- Display everything ---
+    # --- Phase 2: Show raw results ---
     display_results(all_results, category)
+
+    # --- Phase 3: AI Analysis (NEW!) ---
+    if all_results:
+        analysis = analyze_with_ai(question, all_results, category)
+        if analysis:
+            display_analysis(analysis)
 
 
 if __name__ == "__main__":
