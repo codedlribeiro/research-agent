@@ -1,23 +1,96 @@
-# Research Agent - Step 5: AI-Powered Reasoning
+# Research Agent - Step 6: Agent Loops & Memory
 # ================================================
-# Now our agent uses Claude to THINK about the results —
-# summarizing, comparing viewpoints, and creating action plans.
+# The agent now LOOPS — it keeps running, remembers past research,
+# and can refine its searches automatically.
 
 import json
 import os
 import urllib.request
 import urllib.parse
 
-# --- CONCEPT: Third-Party Libraries ---
-# Unlike 'json' and 'os' which come with Python, 'anthropic' is a
-# third-party library we installed with 'pip3 install anthropic'.
-# We use try/except on the import so the program doesn't crash
-# if it's not installed yet.
 try:
     import anthropic
     HAS_ANTHROPIC = True
 except ImportError:
     HAS_ANTHROPIC = False
+
+
+# =============================================================
+#  MEMORY
+# =============================================================
+# --- CONCEPT: Classes ---
+# A class is a blueprint for creating "objects" — things that
+# hold both data AND functions together. Think of it like a
+# template. Our Memory class is a template for creating a
+# research memory that stores past findings.
+
+
+class ResearchMemory:
+    """Stores past research results across multiple queries.
+
+    This gives the agent "memory" — it can reference past findings
+    when analyzing new results, building a richer picture over time.
+    """
+
+    def __init__(self):
+        """Initialize an empty memory.
+
+        __init__ is a special method that runs when you create
+        a new object from this class. 'self' refers to the
+        specific object being created.
+        """
+        self.history = []  # List of past research rounds
+        self.all_results = []  # Every result ever found
+
+    def add_round(self, question, category, results, analysis):
+        """Store a completed research round in memory.
+
+        Parameters:
+            question (str): What was researched.
+            category (str): The research category.
+            results (list): Raw results found.
+            analysis (str): AI analysis of the results.
+        """
+        self.history.append({
+            "question": question,
+            "category": category,
+            "result_count": len(results),
+            "analysis": analysis,
+        })
+        self.all_results.extend(results)
+
+    def get_context(self):
+        """Build a text summary of past research for the AI.
+
+        This is sent to Claude so it knows what was already researched.
+
+        Returns:
+            str: A summary of past research, or empty string if none.
+        """
+        if not self.history:
+            return ""
+
+        context = "\n\nPREVIOUS RESEARCH IN THIS SESSION:\n"
+        for i, round_data in enumerate(self.history, start=1):
+            context += f"\n--- Round {i} ---\n"
+            context += f"Question: {round_data['question']}\n"
+            context += f"Category: {round_data['category']}\n"
+            context += f"Results found: {round_data['result_count']}\n"
+            if round_data['analysis']:
+                # Only include a snippet to keep the prompt manageable
+                snippet = round_data['analysis'][:500]
+                context += f"Analysis summary: {snippet}...\n"
+
+        return context
+
+    def get_round_count(self):
+        """Return how many research rounds have been completed."""
+        return len(self.history)
+
+
+# =============================================================
+#  UI FUNCTIONS
+# =============================================================
 
 
 def greet_user():
@@ -29,11 +102,15 @@ def greet_user():
     print("I help you research markets, competitors,")
     print("trends, and business ideas.")
     print()
+    print("  Type a question to research.")
+    print("  Type 'quit' to exit.")
+    print("  Type 'history' to see past research.")
+    print()
 
 
 def get_question():
     """Ask the user for a research question and return it."""
-    question = input("What would you like to research? ")
+    question = input(">> What would you like to research? ")
     question = question.strip()
 
     if question == "":
@@ -85,13 +162,13 @@ def fetch_url(url):
 
 
 # =============================================================
-#  SOURCE 1: WIKIPEDIA
+#  SEARCH SOURCES
 # =============================================================
 
 
 def search_wikipedia(query):
     """Search Wikipedia for background knowledge on a topic."""
-    print("\n  Searching Wikipedia...")
+    print("  Searching Wikipedia...")
 
     encoded_query = urllib.parse.quote(query)
     search_url = (
@@ -130,11 +207,6 @@ def search_wikipedia(query):
     return results
 
 
-# =============================================================
-#  SOURCE 2: DUCKDUCKGO
-# =============================================================
-
-
 def search_duckduckgo(query):
     """Search DuckDuckGo for web results and instant answers."""
     print("  Searching DuckDuckGo...")
@@ -167,11 +239,6 @@ def search_duckduckgo(query):
 
     print(f"  Found {len(results)} DuckDuckGo result(s).")
     return results
-
-
-# =============================================================
-#  SOURCE 3: REDDIT
-# =============================================================
 
 
 def search_reddit(query):
@@ -225,11 +292,6 @@ def search_reddit(query):
     return results
 
 
-# =============================================================
-#  SOURCE 4: NEWSAPI
-# =============================================================
-
-
 def search_news(query):
     """Search recent news articles using NewsAPI."""
     api_key = os.environ.get("NEWSAPI_KEY", "")
@@ -275,38 +337,85 @@ def search_news(query):
     return results
 
 
+def gather_results(query):
+    """Search all sources and return combined results.
+
+    Parameters:
+        query (str): The search query.
+
+    Returns:
+        list: Combined results from all sources.
+    """
+    all_results = []
+    all_results.extend(search_wikipedia(query))
+    all_results.extend(search_duckduckgo(query))
+    all_results.extend(search_reddit(query))
+    all_results.extend(search_news(query))
+    return all_results
+
+
 # =============================================================
-#  AI-POWERED ANALYSIS (NEW IN STEP 5!)
+#  AI-POWERED ANALYSIS
 # =============================================================
-# This is where the magic happens. Instead of just showing raw
-# results, we send them to Claude (an AI) to:
-#   1. Summarize the key findings
-#   2. Compare different viewpoints
-#   3. Create an action plan
-#
-# --- CONCEPT: LLM (Large Language Model) ---
-# An LLM is an AI that understands and generates text.
-# You talk to it by sending a "prompt" (your instructions)
-# and it sends back a response. It's like texting a very
-# smart assistant.
 
 
-def analyze_with_ai(question, results, category):
-    """Use Claude to analyze research results and provide insights.
+def generate_search_terms(question):
+    """Use AI to generate better search terms from the user's question.
 
-    This function sends all the raw results to Claude along with
-    instructions on how to analyze them. Claude returns a
-    structured analysis with summaries, viewpoints, and action plans.
+    If the user asks "live selling on whatnot tiktok and ebay",
+    Claude will break it into simpler terms that APIs can find:
+    ["live commerce", "whatnot app", "tiktok shop", "ebay live"]
+
+    Parameters:
+        question (str): The user's original question.
+
+    Returns:
+        list: A list of simpler search terms, or [question] if AI unavailable.
+    """
+    if not HAS_ANTHROPIC or not os.environ.get("ANTHROPIC_API_KEY"):
+        return [question]
+
+    try:
+        client = anthropic.Anthropic()
+
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system="""You generate search terms for research queries.
+Given a user's question, return 2-4 simpler search terms that would
+work well with Wikipedia and web search APIs. Return ONLY a JSON array
+of strings, nothing else. Example: ["term one", "term two"]""",
+            messages=[
+                {"role": "user", "content": question}
+            ],
+        )
+
+        response = message.content[0].text.strip()
+        terms = json.loads(response)
+
+        # Make sure we got a list of strings
+        if isinstance(terms, list) and all(isinstance(t, str) for t in terms):
+            print(f"  AI suggested search terms: {terms}")
+            return terms
+
+    except Exception:
+        pass
+
+    return [question]
+
+
+def analyze_with_ai(question, results, category, memory):
+    """Use Claude to analyze research results with memory context.
 
     Parameters:
         question (str): The original research question.
         results (list): All search results gathered.
         category (str): The research category.
+        memory (ResearchMemory): Past research memory.
 
     Returns:
         str: Claude's analysis, or None if AI is unavailable.
     """
-    # Check if we can use AI
     if not HAS_ANTHROPIC:
         print("\n  [AI analysis unavailable — run: pip3 install anthropic]")
         return None
@@ -319,10 +428,6 @@ def analyze_with_ai(question, results, category):
 
     print("\n  Analyzing results with AI...")
 
-    # --- CONCEPT: Preparing Data for the AI ---
-    # We need to convert our results into text that Claude can read.
-    # This is called "building a prompt" — the better your prompt,
-    # the better the AI's response.
     results_text = ""
     for i, result in enumerate(results, start=1):
         results_text += f"\n--- Result {i} ---\n"
@@ -331,10 +436,10 @@ def analyze_with_ai(question, results, category):
         results_text += f"Summary: {result['summary']}\n"
         results_text += f"URL: {result['url']}\n"
 
-    # --- CONCEPT: System Prompt vs User Prompt ---
-    # When talking to an LLM, you typically send two things:
-    #   - System prompt: Sets the AI's role and behavior
-    #   - User prompt: The actual question or task
+    # --- CONCEPT: Context from Memory ---
+    # We include past research so the AI can build on previous findings.
+    memory_context = memory.get_context()
+
     system_prompt = """You are a business research analyst. Your job is to analyze
 research results and provide clear, actionable insights.
 
@@ -343,29 +448,27 @@ Always structure your response with these sections:
 2. KEY FINDINGS — Bullet points of the most important facts
 3. DIFFERENT VIEWPOINTS — If the sources show different perspectives, highlight them
 4. ACTION PLAN — 3-5 concrete next steps the user could take based on the research
+5. SUGGESTED FOLLOW-UPS — 2-3 follow-up questions the user could ask next
 
 Keep your response concise and focused on business value.
 If the results are limited or not very relevant, say so honestly
-and suggest better search terms."""
+and suggest better search terms the user could try.
+
+If previous research context is provided, reference it and build on it
+rather than repeating the same information."""
 
     user_prompt = f"""Research Question: {question}
 Category: {category}
+{memory_context}
 
-Here are the research results I gathered from multiple sources:
+Here are the NEW research results I gathered:
 {results_text}
 
 Please analyze these results and provide your structured analysis."""
 
-    # --- CONCEPT: Making an API Call to an LLM ---
-    # We create a "client" (our connection to Claude), then send
-    # a message with our prompts. The API returns Claude's response.
     try:
-        client = anthropic.Anthropic()  # Uses ANTHROPIC_API_KEY automatically
+        client = anthropic.Anthropic()
 
-        # --- CONCEPT: API Parameters ---
-        # model: Which AI model to use (haiku is fast and cheap)
-        # max_tokens: Maximum length of the response
-        # messages: The conversation (role + content pairs)
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1024,
@@ -375,10 +478,7 @@ Please analyze these results and provide your structured analysis."""
             ],
         )
 
-        # The response contains a list of content blocks
-        # We extract the text from the first one
-        response_text = message.content[0].text
-        return response_text
+        return message.content[0].text
 
     except Exception as error:
         print(f"  [AI analysis error: {error}]")
@@ -386,14 +486,14 @@ Please analyze these results and provide your structured analysis."""
 
 
 # =============================================================
-#  DISPLAY RESULTS
+#  DISPLAY
 # =============================================================
 
 
 def display_results(results, category):
     """Display raw research results to the user."""
     if not results:
-        print("\n  No results found. Try rephrasing your question.")
+        print("\n  No results found.")
         return
 
     print(f"\n{'═' * 50}")
@@ -419,17 +519,36 @@ def display_results(results, category):
 
 
 def display_analysis(analysis):
-    """Display the AI's analysis to the user.
-
-    Parameters:
-        analysis (str): The AI-generated analysis text.
-    """
+    """Display the AI's analysis to the user."""
     print(f"\n{'═' * 50}")
     print(f"  AI ANALYSIS")
     print(f"{'═' * 50}")
     print()
     print(analysis)
     print(f"\n{'═' * 50}")
+
+
+def display_history(memory):
+    """Show a summary of all past research in this session.
+
+    Parameters:
+        memory (ResearchMemory): The research memory object.
+    """
+    if memory.get_round_count() == 0:
+        print("\n  No research history yet. Ask a question to get started!")
+        return
+
+    print(f"\n{'═' * 50}")
+    print(f"  RESEARCH HISTORY ({memory.get_round_count()} rounds)")
+    print(f"{'═' * 50}")
+
+    for i, round_data in enumerate(memory.history, start=1):
+        print(f"\n  Round {i}: {round_data['question']}")
+        print(f"    Category: {round_data['category']}")
+        print(f"    Results: {round_data['result_count']}")
+
+    print(f"\n  Total results gathered: {len(memory.all_results)}")
+    print(f"{'═' * 50}")
 
 
 def _count_sources(results):
@@ -441,39 +560,108 @@ def _count_sources(results):
 
 
 # =============================================================
-#  MAIN
+#  MAIN — THE AGENT LOOP
 # =============================================================
+# --- CONCEPT: The Agent Loop ---
+# Previously our agent ran once and exited. Now it LOOPS:
+#   1. Ask a question
+#   2. Search for answers
+#   3. Analyze with AI
+#   4. Store in memory
+#   5. Go back to step 1
+#
+# This is the core pattern behind all AI agents — a loop that
+# observes, thinks, acts, and remembers.
+
+
+def research_round(question, memory):
+    """Execute a single round of research.
+
+    Parameters:
+        question (str): What to research.
+        memory (ResearchMemory): The shared memory object.
+    """
+    category = categorize_question(question)
+    print(f"\n  Category: {category}")
+
+    # --- Phase 1: Generate smart search terms ---
+    print(f"\n  Generating search terms...")
+    search_terms = generate_search_terms(question)
+
+    # --- Phase 2: Search with each term and combine results ---
+    all_results = []
+    for term in search_terms:
+        print(f"\n  Searching for: '{term}'")
+        results = gather_results(term)
+        all_results.extend(results)
+
+    # --- CONCEPT: Deduplication ---
+    # When searching multiple terms, we might get the same result twice.
+    # We remove duplicates by checking URLs we've already seen.
+    seen_urls = set()
+    unique_results = []
+    for result in all_results:
+        if result["url"] not in seen_urls:
+            seen_urls.add(result["url"])
+            unique_results.append(result)
+
+    all_results = unique_results
+
+    # --- Phase 3: Show raw results ---
+    display_results(all_results, category)
+
+    # --- Phase 4: AI Analysis with memory ---
+    analysis = None
+    if all_results:
+        analysis = analyze_with_ai(question, all_results, category, memory)
+        if analysis:
+            display_analysis(analysis)
+    else:
+        print("\n  No results found. Try rephrasing your question,")
+        print("  or use broader/simpler terms.")
+
+    # --- Phase 5: Store in memory ---
+    memory.add_round(question, category, all_results, analysis)
 
 
 def main():
-    """Run the research agent."""
+    """Run the research agent loop."""
     greet_user()
 
-    question = get_question()
+    # --- CONCEPT: Creating an Object from a Class ---
+    # This creates a new ResearchMemory object. It's like filling
+    # out the blueprint — now 'memory' is a real thing we can use.
+    memory = ResearchMemory()
 
-    if question is None:
-        print("No question entered. Goodbye!")
-        return
+    # --- CONCEPT: While Loop ---
+    # A 'while True' loop runs forever until we explicitly 'break' out.
+    # This is what makes our agent persistent — it keeps asking
+    # for questions until the user says 'quit'.
+    while True:
+        print()
+        question = get_question()
 
-    category = categorize_question(question)
-    print(f"\n  Category: {category}")
-    print(f"  Researching: {question}")
+        if question is None:
+            print("  Please enter a question, or type 'quit' to exit.")
+            continue
 
-    # --- Phase 1: Gather results from ALL sources ---
-    all_results = []
-    all_results.extend(search_wikipedia(question))
-    all_results.extend(search_duckduckgo(question))
-    all_results.extend(search_reddit(question))
-    all_results.extend(search_news(question))
+        # --- CONCEPT: Command Handling ---
+        # Check for special commands before treating input as a question.
+        command = question.lower().strip()
 
-    # --- Phase 2: Show raw results ---
-    display_results(all_results, category)
+        if command in ("quit", "exit", "q"):
+            print(f"\n  Goodbye! Completed {memory.get_round_count()} research round(s).")
+            break
 
-    # --- Phase 3: AI Analysis (NEW!) ---
-    if all_results:
-        analysis = analyze_with_ai(question, all_results, category)
-        if analysis:
-            display_analysis(analysis)
+        if command == "history":
+            display_history(memory)
+            continue
+
+        # --- Run a research round ---
+        research_round(question, memory)
+
+        print(f"\n  Research round {memory.get_round_count()} complete.")
+        print("  Ask another question to dig deeper, or type 'quit' to exit.")
 
 
 if __name__ == "__main__":
